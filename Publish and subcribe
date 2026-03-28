@@ -1,0 +1,46 @@
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <WiFiClientSecure.h>
+
+
+
+WiFiClientSecure espClient;
+PubSubClient client(espClient);
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Connect to Wi-Fi
+  WiFi.begin("PC", "aliali786");
+  Serial.println("Connecting........");
+  while (WiFi.status() != WL_CONNECTED) {}
+  Serial.println("Connected");
+
+  // Configure Secure Client
+  espClient.setInsecure(); // Use this if you don't have a specific CA cert
+  client.setServer("e51ea384284c45198861d187a9d55cbe.s1.eu.hivemq.cloud", 8883);
+
+  // Connect to MQTT
+  while (!client.connected()) {
+    String client_id = "esp32-client-";
+    client_id += String(WiFi.macAddress());
+    if (client.connect(client_id.c_str(), "236034", "Fast6034")) {
+      Serial.println("Connected to HiveMQ");
+    } else {
+      Serial.print("Failed to connect, rc=");
+      Serial.print(client.state());
+      delay(2000);
+    }
+  }
+}
+
+void loop() {
+  client.loop();
+  
+  // Publish message
+  String payload = "IoT Application Layer Protocol" + String(millis());
+  client.publish("Esp32/Assignment-2", payload.c_str());
+  Serial.println("Published: " + payload);
+  
+  delay(50000); // Publish every 5 seconds
+}
