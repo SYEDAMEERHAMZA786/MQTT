@@ -23,7 +23,7 @@ void reconnect() {
   while (!client.connected()) {
     String clientId = "ESP32Client-" + String(random(0xffff), HEX);
     if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
-      client.subscribe("test/topic");
+      client.subscribe("Esp32/Assignment-2");
     } else { delay(5000); }
   }
 }
