@@ -1,0 +1,262 @@
+#include <WiFi.h>
+#include <coap-simple.h>
+
+// WiFi ky  credentials
+const char* ssid = "Salman ";
+const char* password = "salman321@";
+// CoAP server ki details
+const char* coapServer = "coap.me";
+const int coapPort = 5683;
+// UDP and CoAP objects
+WiFiUDP udp;
+Coap coap(udp);
+// Payload ya jo message hum bhj 
+const char* payload = "IoT Application Layer Protocol";
+
+// Flags to track the state
+bool messageSent = false;
+bool responseReceived = false;
+bool getRequestSent = false;
+bool waitingForUser = false;
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 10000;
+int cycleCount = 0;
+
+// ─── Wait kraiy ga jb tk user enter na press kraiy next cycle chalanaiy ky liay 
+void waitForEnter() {
+  Serial.println("╔══════════════════════════════════════════╗");
+  Serial.println("║  >>> Press ENTER to start next cycle <<< ║");
+  Serial.println("╚══════════════════════════════════════════╝");
+  // Flush any leftover input
+  while (Serial.available() > 0) {
+    Serial.read();
+  }
+  // Wait kraiy ga tb tk jb tk user presses ENTER press na kriay
+  while (Serial.available() == 0) {
+    delay(100);
+  }
+  // Clear input buffer
+  while (Serial.available() > 0) {
+    Serial.read();
+  }
+  Serial.println(">>> Resuming...\n");
+  delay(500);
+}
+
+// CoAP ky Response ka Callback
+void responseCallback(CoapPacket &packet, IPAddress ip, int port) {
+  Serial.println("\n========== CoAP Response Received ==========");
+  Serial.print("From IP     : ");
+  Serial.println(ip);
+  Serial.print("From Port   : ");
+  Serial.println(port);
+  Serial.print("Response Code: ");
+  Serial.println(packet.code);
+  Serial.print("Message ID  : ");
+  Serial.println(packet.messageid);
+  Serial.print("Token Length: ");
+  Serial.println(packet.tokenlen);
+  // Extract kraiy ga or show kray ga  response ko or payload yani hamra msg jo ha string
+  if (packet.payloadlen > 0) {
+    char responsePayload[packet.payloadlen + 1];
+    memcpy(responsePayload, packet.payload, packet.payloadlen);
+    responsePayload[packet.payloadlen] = '\0';
+    Serial.print("Payload     : ");
+    Serial.println(responsePayload);
+    Serial.print("Payload Len : ");
+    Serial.println(packet.payloadlen);
+    Serial.println("--------------------------------------------");
+    // Validate received data
+    if (strcmp(responsePayload, payload) == 0) {
+      Serial.println("[VALIDATION] SUCCESS: Data matches sent payload!");
+    } else {
+      Serial.println("[VALIDATION] NOTE: Server modified the response.");
+      Serial.print("  Sent    : ");
+      Serial.println(payload);
+      Serial.print("  Received: ");
+      Serial.println(responsePayload);
+    }
+  } else {
+    Serial.println("Payload     : (empty - server acknowledged)");
+  }
+  Serial.println("============================================\n");
+
+  // If this was PUT response, send GET next
+  if (!getRequestSent) {
+    responseReceived = true;
+  } else {
+    // GET response received ho gya means 1 full cycle complete ho gya
+    Serial.println("╔══════════════════════════════════════════╗");
+    Serial.print("║        CoAP Cycle #");
+    Serial.print(cycleCount);
+    Serial.println(" Complete!            ║");
+    Serial.println("╚══════════════════════════════════════════╝");
+    Serial.println();
+    Serial.println("  CYCLE SUMMARY:");
+    Serial.println("  ✔ PUT Request Sent");
+    Serial.println("  ✔ PUT Response Received");
+    Serial.println("  ✔ GET Request Sent");
+    Serial.println("  ✔ GET Response Received");
+    Serial.println("  ✔ Data Validated");
+    Serial.println();
+    // Reset flags
+    getRequestSent = false;
+    messageSent = false;
+    responseReceived = false;
+    waitingForUser = true;  // Signal to wait for ENTER
+  }
+}
+// WiFi kt sath connection setup krna 
+void connectToWiFi() {
+  WiFi.disconnect(true);
+  delay(1000);
+  WiFi.mode(WIFI_STA);
+  Serial.println("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected successfully!");
+    Serial.print("IP Address : ");
+    Serial.println(WiFi.localIP());
+    Serial.print("RSSI       : ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+  } else {
+    Serial.println("\nWiFi connection failed! Restarting...");
+    ESP.restart();
+  }
+}
+// Send CoAP bhj rha ha  PUT Request
+void sendCoapRequest() {
+  IPAddress serverIP;
+  cycleCount++;
+
+  Serial.println("============================================");
+  Serial.print("      CoAP Cycle #");
+  Serial.print(cycleCount);
+  Serial.println(" Starting");
+  Serial.println("============================================");
+  Serial.println("\n---------- Sending CoAP PUT Request ----------");
+  Serial.print("Resolving server: ");
+  Serial.println(coapServer);
+
+  if (!WiFi.hostByName(coapServer, serverIP)) {
+    Serial.println("DNS resolution failed! Retrying in 10 seconds...");
+    lastSendTime = millis();
+    messageSent = false;
+    return;
+  }
+
+  Serial.print("Server IP   : ");
+  Serial.println(serverIP);
+  Serial.print("Server Port : ");
+  Serial.println(coapPort);
+  Serial.println("Method      : CoAP PUT (Confirmable)");
+  Serial.println("Resource    : /test");
+  Serial.print("Payload     : ");
+  Serial.println(payload);
+  Serial.print("Payload Len : ");
+  Serial.println(strlen(payload));
+  uint16_t msgID = coap.put(serverIP, coapPort, "test", payload);
+  if (msgID != 0) {
+    Serial.print("Request sent! Message ID: ");
+    Serial.println(msgID);
+    Serial.println("Waiting for server response...");
+    lastSendTime = millis();
+    messageSent = true;
+    responseReceived = false;
+    getRequestSent = false;
+  } else {
+    Serial.println("Failed to send CoAP PUT request!");
+    lastSendTime = millis();
+    messageSent = false;
+  }
+  Serial.println("----------------------------------------------\n");
+}
+//Sending  CoAP GET Request
+void getCoapResource() {
+  IPAddress serverIP;
+  Serial.println("\n---------- Sending CoAP GET Request ----------");
+  Serial.print("Resolving server: ");
+  Serial.println(coapServer);
+  if (!WiFi.hostByName(coapServer, serverIP)) {
+    Serial.println("DNS resolution failed!");
+    return;
+  }
+  Serial.print("Server IP   : ");
+  Serial.println(serverIP);
+  Serial.println("Method      : CoAP GET");
+  Serial.println("Resource    : /test");
+  Serial.println("Purpose     : Retrieving stored payload from server");
+  uint16_t msgID = coap.get(serverIP, coapPort, "test");
+  if (msgID != 0) {
+    Serial.print("GET Request sent! Message ID: ");
+    Serial.println(msgID);
+    Serial.println("Waiting for GET response...");
+    getRequestSent = true;
+  } else {
+    Serial.println("Failed to send GET request!");
+  }
+
+  Serial.println("----------------------------------------------\n");
+}
+// Main Setup code neechaiy likha howa ha 
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("============================================");
+  Serial.println("   ESP32 CoAP Client - IoT Protocol Demo   ");
+  Serial.println("============================================");
+  Serial.println("Protocol    : CoAP (Constrained Application Protocol)");
+  Serial.println("Transport   : UDP");
+  Serial.println("Default Port: 5683");
+  Serial.println("Model       : Request-Response");
+  Serial.println("============================================\n");
+  connectToWiFi();
+  coap.response(responseCallback);
+  coap.start();
+  Serial.println("\nCoAP client initialized and ready.");
+  Serial.println("Starting first cycle...\n");
+  delay(1000);
+  sendCoapRequest();
+}
+// Loop ocde neechaiy likha howa ha 
+void loop() {
+  // Always ye anaiy walaiy CoAP packets ko handle kraiy ga  
+  coap.loop();
+  // Jb 1 cycle complete hoga tou wait kraiy ga next cycle ko run krny ky laiy jb tk use enter ni press kriay ga 
+  if (waitingForUser) {
+    waitingForUser = false;
+    waitForEnter();       // yahn rokaiy ga jb tk user enter press ni kr daita 
+    lastSendTime = 0;     // timer ko reset kr daiy ga
+    sendCoapRequest();    // next cylce ko run krny ky liay 
+    return;
+  }
+  // PUT response ky baad, send GET
+  if (responseReceived) {
+    Serial.println("PUT confirmed by server.");
+    Serial.println("Now sending GET to retrieve stored data...");
+    delay(1000);
+    getCoapResource();
+    responseReceived = false;
+  }
+  // Timeout - dobara PUT kro agr 10 seconds mn response ni milta 
+  if (messageSent && !responseReceived && !getRequestSent) {
+    if (millis() - lastSendTime > 10000) {
+      Serial.println("[TIMEOUT] No PUT response. Retrying...");
+      sendCoapRequest();
+    }
+  }
+  // Auto start new cycle if not waiting or running
+  if (!messageSent && !getRequestSent && !waitingForUser) {
+    if (millis() - lastSendTime > sendInterval) {
+      sendCoapRequest();
+    }
+  }
+  delay(100);
+}
