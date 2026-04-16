@@ -12,7 +12,7 @@ const int mqtt_port = 8883;
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
-// ✅ Callback function - fires whenever a message is received
+
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message received on topic [");
   Serial.print(topic);
@@ -44,7 +44,7 @@ void reconnect() {
     if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
       Serial.println("Connected to HiveMQ!");
 
-      // ✅ Subscribe to the SAME topic the publisher uses
+      
       client.subscribe("Esp32/Assignment-2");
       Serial.println("Subscribed to: Esp32/Assignment-2");
 
@@ -64,7 +64,7 @@ void setup() {
   espClient.setInsecure();
   client.setServer(mqtt_server, mqtt_port);
 
-  // ✅ Register the callback BEFORE connecting
+
   client.setCallback(callback);
 }
 
@@ -73,25 +73,3 @@ void loop() {
     reconnect();
   }
 
-  // ✅ Must call loop() to process incoming messages
-  client.loop();
-}
-```
-
-Here's what was changed and why:
-
-**1. Added `callback()` function**
-This is the core fix. PubSubClient requires you to define a function that gets called automatically when a message arrives. It receives the topic, raw byte payload, and length.
-
-**2. Registered callback with `client.setCallback(callback)`**
-Called in `setup()` before connecting — this wires the function to the MQTT client.
-
-**3. Fixed the topic** — your original subscriber was listening to `"test/topic"` but the publisher sends to `"Esp32/Assignment-2"`. Now both match.
-
-**4. Removed the publish block from `loop()`** — a subscriber doesn't need to publish anything; keeping it clean avoids confusion.
-
-**5. Matched WiFi credentials** to your publisher (`"PC"` / `"aliali786"`).
-
-The Serial Monitor on the subscriber will now print something like:
-```
-Message received on topic [Esp32/Assignment-2]: IoT Application Layer Protocol12345
